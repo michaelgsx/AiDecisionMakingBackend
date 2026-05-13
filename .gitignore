@@ -1,0 +1,32 @@
+# Java / Maven
+backend/target/
+*.class
+*.jar
+*.war
+*.log
+.mvn/
+!.mvn/wrapper/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.project
+.classpath
+.settings/
+
+# Python
+db/__pycache__/
+db/*.pyc
+*.egg-info/
+.venv/
+venv/
+
+# Secrets
+.env
+db/.env
+*.local
+
+# OS
+.DS_Store
+Thumbs.db

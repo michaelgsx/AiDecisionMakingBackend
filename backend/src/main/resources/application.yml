@@ -1,0 +1,20 @@
+server:
+  port: ${PORT:8787}
+
+spring:
+  datasource:
+    url: jdbc:sqlserver://${AZURE_SQL_SERVER:ai-rag-sql-server.database.windows.net}:${AZURE_SQL_PORT:1433};databaseName=${AZURE_SQL_DATABASE:ai-rag-db-1};encrypt=true;trustServerCertificate=false;loginTimeout=30
+    username: ${AZURE_SQL_USER:}
+    password: ${AZURE_SQL_PASSWORD:}
+    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.SQLServerDialect
+
+app:
+  ops-token: ${OPS_TOKEN:}
+  cors-origins: ${CORS_ORIGIN:http://localhost:5173}
