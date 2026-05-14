@@ -11,7 +11,7 @@ public class RiskIngestRecord {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "record_uuid", nullable = false, length = 36, unique = true)
+    @Column(name = "record_uuid", nullable = false, unique = true, columnDefinition = "CHAR(36)")
     private String recordUuid;
 
     @Column(name = "review_outcome", nullable = false, length = 20)
