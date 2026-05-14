@@ -4,7 +4,8 @@ backend/target/
 *.jar
 *.war
 *.log
-.mvn/
+# Ignore .mvn except the wrapper properties needed for CI
+.mvn/*
 !.mvn/wrapper/
 
 # IDE
