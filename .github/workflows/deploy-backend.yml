@@ -1,0 +1,57 @@
+# Deploy Spring Boot backend to Azure App Service (ai-rag-webapp).
+# Uses Service Principal login — no publish profile / basic auth needed.
+#
+# --- GitHub → Settings → Secrets and variables → Actions ---
+#
+# Secrets (required):
+#   AZURE_CREDENTIALS
+#     JSON: { "clientId": "…", "clientSecret": "…", "tenantId": "…", "subscriptionId": "…" }
+#     Same SP used by the frontend SWA workflow. The SP needs the
+#     "Website Contributor" role on the App Service (or the resource group).
+
+name: Deploy Java Backend (Azure App Service)
+
+on:
+  push:
+    branches: [v1]
+    paths:
+      - "backend/**"
+      - ".github/workflows/deploy-backend.yml"
+  workflow_dispatch:
+
+env:
+  AZURE_WEBAPP_NAME: ai-rag-webapp
+  JAVA_VERSION: "17"
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
+
+      - name: Build with Maven
+        working-directory: backend
+        run: ./mvnw clean package -DskipTests -B
+
+      - name: Azure login (service principal)
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy JAR to Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ env.AZURE_WEBAPP_NAME }}
+          package: backend/target/*.jar
+
+      - name: Azure logout
+        if: always()
+        run: az logout || true

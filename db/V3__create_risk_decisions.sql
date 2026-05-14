@@ -26,6 +26,6 @@ GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_risk_decisions_decision'        AND object_id = OBJECT_ID(N'dbo.risk_decisions'))
   CREATE INDEX IX_risk_decisions_decision        ON dbo.risk_decisions (decision);
 GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_risk_decisions_is_final'        AND object_id = OBJECT_ID(N'dbo.risk_decisions'))
-  CREATE INDEX IX_risk_decisions_is_final        ON dbo.risk_decisions (is_final) WHERE is_final = 0;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_risk_decisions_non_final'       AND object_id = OBJECT_ID(N'dbo.risk_decisions'))
+  CREATE INDEX IX_risk_decisions_non_final       ON dbo.risk_decisions (decision) WHERE decision = 'freeze';
 GO

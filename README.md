@@ -6,8 +6,14 @@ Java (Spring Boot 3) backend + Python DB migration tooling for the AI RAG risk-r
 
 ```
 ├── db/                          # Database migrations & tooling
-│   ├── V1__create_risk_ingest_records.sql   # Table DDL for Azure SQL
+│   ├── V1__create_risk_ingest_records.sql
+│   ├── V2__create_risk_features.sql
+│   ├── V3__create_risk_decisions.sql
+│   ├── V4__create_risk_embeddings.sql
+│   ├── V5__create_activity_log.sql       # Tamper-evident audit chain
 │   ├── run_migrations.py        # Python script to execute .sql files remotely
+│   ├── seed_data.py             # Insert sample data into all tables
+│   ├── seed_activity_log.py     # Insert chained-hash audit log samples
 │   ├── requirements.txt         # Python dependencies (pymssql, python-dotenv)
 │   └── .env.example             # Connection config template
 │
@@ -26,11 +32,16 @@ Java (Spring Boot 3) backend + Python DB migration tooling for the AI RAG risk-r
 
 ## API Endpoints
 
-| Method | Path           | Description                                 |
-|--------|---------------|---------------------------------------------|
-| POST   | /rag/ingest   | Save a risk record (Pass / Reject / Freeze) |
-| POST   | /rag/assess   | Risk assessment placeholder (RAG pipeline)  |
-| GET    | /health       | DB connectivity check                       |
+| Method | Path                              | Description                                      |
+|--------|----------------------------------|--------------------------------------------------|
+| POST   | /rag/ingest                       | Save a risk record (Pass / Reject / Freeze)      |
+| POST   | /rag/assess                       | Risk assessment placeholder (RAG pipeline)       |
+| GET    | /health                           | DB connectivity check                            |
+| POST   | /audit/log                        | Append an activity log entry (chained hash)      |
+| GET    | /audit/log                        | List all activity log entries                     |
+| GET    | /audit/log/user/{userId}          | Activity log entries for a user                  |
+| GET    | /audit/log/transaction/{txnId}    | Activity log entries for a transaction           |
+| GET    | /audit/log/verify/{userId}        | Verify hash chain integrity for a user           |
 
 ### POST /rag/ingest
 
