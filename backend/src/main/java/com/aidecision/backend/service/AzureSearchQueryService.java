@@ -52,13 +52,8 @@ public class AzureSearchQueryService {
         ObjectNode root = mapper.createObjectNode();
         root.put("top", top);
         root.put("count", true);
-        root.set("select", mapper.createArrayNode()
-                .add("id")
-                .add("recordId")
-                .add("reviewOutcome")
-                .add("caseNotes")
-                .add("metadataJson")
-                .add("content"));
+        // REST API expects comma-separated string, not a JSON array (array → HTTP 400 StartArray vs PrimitiveValue).
+        root.put("select", "id,recordId,reviewOutcome,caseNotes,metadataJson,content");
 
         String lex = lexicalQuery != null ? lexicalQuery.trim() : "";
         if (!lex.isEmpty()) {
