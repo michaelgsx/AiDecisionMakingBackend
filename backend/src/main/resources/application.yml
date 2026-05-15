@@ -20,13 +20,14 @@ app:
   cors-origins: ${CORS_ORIGINS:http://localhost:5173}
   # --- Azure OpenAI (one resource: two deployments) ---
   # Same AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY for both lines below.
-  # In Azure AI Studio create: (1) an embeddings deployment, (2) a chat deployment (e.g. gpt-4o).
+  # In Microsoft Foundry: Shared resources → Deployments (e.g. text-embedding-ada-002 + gpt-4o-mini).
   azure-openai:
     # Base URL only, no trailing slash (e.g. https://your-resource.openai.azure.com)
     endpoint: ${AZURE_OPENAI_ENDPOINT:}
     api-key: ${AZURE_OPENAI_API_KEY:}
+    # Example (resource ai-reg-embedding): text-embedding-ada-002 + gpt-4o-mini
     embedding-deployment: ${AZURE_OPENAI_EMBEDDING_DEPLOYMENT:}
-    # Chat deployment for /rag/assess (label + reason), e.g. gpt-4o — separate from embedding deployment.
+    # Chat deployment for /rag/assess (label + reason), e.g. gpt-4o-mini — separate from embedding deployment.
     chat-deployment: ${AZURE_OPENAI_CHAT_DEPLOYMENT:}
     # If blank, defaults to 2024-08-01-preview (required for json_object on many chat models).
     chat-api-version: ${AZURE_OPENAI_CHAT_API_VERSION:}
