@@ -16,6 +16,14 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -25,7 +33,13 @@ class AssessServiceTest {
     private AzureOpenAiEmbeddingService embeddingClient;
 
     @Mock
+    private AzureOpenAiChatService chatService;
+
+    @Mock
     private AzureSearchQueryService searchQueryService;
+
+    @Mock
+    private ActivityLogService activityLogService;
 
     private final AzureOpenAiProperties openAi = new AzureOpenAiProperties();
     private final AzureSearchProperties search = new AzureSearchProperties();
@@ -35,7 +49,7 @@ class AssessServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new AssessService(embeddingClient, openAi, searchQueryService, search, mapper);
+        service = new AssessService(embeddingClient, chatService, openAi, searchQueryService, search, mapper, activityLogService);
     }
 
     @Test
@@ -44,6 +58,9 @@ class AssessServiceTest {
         AssessResponse res = service.assess(new AssessRequest("note", "{}"));
         assertThat(res.similarRecords()).isEmpty();
         assertThat(res.reason()).contains("Azure AI Search is not configured");
+        assertThat(res.aiLabel()).isNull();
+        verify(chatService, never()).classifyWithSimilar(anyString(), anyString(), anyList());
+        verify(activityLogService, never()).tryAppendFromApi(any(), any(), any(), any());
     }
 
     @Test
@@ -54,6 +71,8 @@ class AssessServiceTest {
         search.setSkip(true);
         AssessResponse res = service.assess(new AssessRequest("note", "{}"));
         assertThat(res.similarRecords()).isEmpty();
+        verify(chatService, never()).classifyWithSimilar(anyString(), anyString(), anyList());
+        verify(activityLogService, never()).tryAppendFromApi(any(), any(), any(), any());
     }
 
     @Test
@@ -84,6 +103,42 @@ class AssessServiceTest {
         assertThat(res.similarRecords().get(0)).isEqualTo(new SimilarRecord("rid-1", "[passed] hello", 0.91));
         assertThat(res.reason()).contains("hybrid");
         assertThat(res.risk()).isEqualTo("high");
+        assertThat(res.aiLabel()).isNull();
+        verify(chatService, never()).classifyWithSimilar(anyString(), anyString(), anyList());
+        verify(activityLogService).tryAppendFromApi(
+                eq("u1"),
+                argThat((String t) -> t != null && t.startsWith("assess-")),
+                eq("pass"),
+                eq("add"));
+    }
+
+    @Test
+    void chatStepOverridesRiskWhenConfigured() {
+        search.setEndpoint("https://x.search.windows.net");
+        search.setAdminKey("k");
+        search.setIndexName("risk-records");
+        search.setSkip(false);
+
+        openAi.setEndpoint("http://openai");
+        openAi.setApiKey("k");
+        openAi.setEmbeddingDeployment("d");
+        openAi.setChatDeployment("gpt");
+        openAi.setSkipEmbedding(false);
+
+        when(embeddingClient.embed(org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(new AzureOpenAiEmbeddingService.EmbeddingVector(List.of(0.1), "m"));
+        when(searchQueryService.searchSimilar(anyString(), anyList(), org.mockito.ArgumentMatchers.eq(8)))
+                .thenReturn(List.of(new AzureSearchQueryService.SimilarHit("a", "snip", 0.9)));
+        when(chatService.classifyWithSimilar(anyString(), anyString(), anyList()))
+                .thenReturn(new AzureOpenAiChatService.LabelDecision("rejected", "Pattern matches prior rejects."));
+
+        AssessResponse res = service.assess(new AssessRequest("t", "{}"));
+
+        assertThat(res.aiLabel()).isEqualTo("rejected");
+        assertThat(res.aiReason()).contains("Pattern");
+        assertThat(res.risk()).isEqualTo("high");
+        verify(chatService).classifyWithSimilar(anyString(), anyString(), anyList());
+        verify(activityLogService).tryAppendFromApi(isNull(), anyString(), eq("pass"), eq("add"));
     }
 
     @Test
@@ -100,6 +155,7 @@ class AssessServiceTest {
         AssessResponse res = service.assess(new AssessRequest("only text", null));
         assertThat(res.reason()).contains("No indexed cases matched");
         assertThat(res.risk()).isEqualTo("low");
+        verify(activityLogService).tryAppendFromApi(isNull(), anyString(), eq("pass"), eq("add"));
     }
 
     @Test
@@ -123,5 +179,6 @@ class AssessServiceTest {
         assertThatThrownBy(() -> service.assess(new AssessRequest("text", null)))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("search down");
+        verify(activityLogService, never()).tryAppendFromApi(any(), any(), any(), any());
     }
 }

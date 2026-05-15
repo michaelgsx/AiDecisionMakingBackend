@@ -18,14 +18,23 @@ spring:
 app:
   ops-token: ${OPS_TOKEN:}
   cors-origins: ${CORS_ORIGINS:http://localhost:5173}
+  # --- Azure OpenAI (one resource: two deployments) ---
+  # Same AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_API_KEY for both lines below.
+  # In Azure AI Studio create: (1) an embeddings deployment, (2) a chat deployment (e.g. gpt-4o).
   azure-openai:
     # Base URL only, no trailing slash (e.g. https://your-resource.openai.azure.com)
     endpoint: ${AZURE_OPENAI_ENDPOINT:}
     api-key: ${AZURE_OPENAI_API_KEY:}
     embedding-deployment: ${AZURE_OPENAI_EMBEDDING_DEPLOYMENT:}
+    # Chat deployment for /rag/assess (label + reason), e.g. gpt-4o — separate from embedding deployment.
+    chat-deployment: ${AZURE_OPENAI_CHAT_DEPLOYMENT:}
+    # If blank, defaults to 2024-08-01-preview (required for json_object on many chat models).
+    chat-api-version: ${AZURE_OPENAI_CHAT_API_VERSION:}
     api-version: ${AZURE_OPENAI_API_VERSION:2024-02-01}
     # Set true for local dev without calling Azure (ingest still writes risk_features + risk_ingest_records).
     skip-embedding: ${AZURE_OPENAI_SKIP_EMBEDDING:false}
+    # Skip chat label step (similar search still runs).
+    skip-chat: ${AZURE_OPENAI_SKIP_CHAT:false}
   azure-search:
     endpoint: ${AZURE_SEARCH_ENDPOINT:}
     admin-key: ${AZURE_SEARCH_ADMIN_KEY:}

@@ -10,6 +10,7 @@ import com.aidecision.backend.entity.RiskIngestRecord;
 import com.aidecision.backend.repository.RiskEmbeddingRepository;
 import com.aidecision.backend.repository.RiskFeatureRepository;
 import com.aidecision.backend.repository.RiskIngestRecordRepository;
+import com.aidecision.backend.support.MetadataUserRefs;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -21,6 +22,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Instant;
+import java.util.Locale;
 import java.util.UUID;
 
 @Service
@@ -39,6 +41,7 @@ public class IngestService {
     private final AzureSearchProperties searchProperties;
     private final ObjectMapper mapper;
     private final TransactionTemplate transactionTemplate;
+    private final ActivityLogService activityLogService;
 
     public IngestService(
             RiskIngestRecordRepository ingestRepo,
@@ -49,7 +52,8 @@ public class IngestService {
             AzureSearchIngestService searchIngestService,
             AzureSearchProperties searchProperties,
             ObjectMapper mapper,
-            TransactionTemplate transactionTemplate) {
+            TransactionTemplate transactionTemplate,
+            ActivityLogService activityLogService) {
         this.ingestRepo = ingestRepo;
         this.featureRepo = featureRepo;
         this.embeddingRepo = embeddingRepo;
@@ -59,6 +63,7 @@ public class IngestService {
         this.searchProperties = searchProperties;
         this.mapper = mapper;
         this.transactionTemplate = transactionTemplate;
+        this.activityLogService = activityLogService;
     }
 
     public IngestResponse ingest(IngestRequest req) {
@@ -115,6 +120,7 @@ public class IngestService {
             throw new IllegalStateException("Ingest transaction returned no response");
         }
 
+        IngestResponse out = res;
         if (embeddingVector != null) {
             if (searchProperties.isSkip()) {
                 log.info("Skipping Azure AI Search (AZURE_SEARCH_SKIP=true)");
@@ -126,7 +132,7 @@ public class IngestService {
                                 + "or set AZURE_SEARCH_SKIP=true to skip indexing.");
             } else {
                 searchIngestService.uploadIngestDocument(recordId, req, mergedMetadata, embedText, embeddingVector);
-                return new IngestResponse(
+                out = new IngestResponse(
                         res.ok(),
                         res.recordIndex(),
                         res.recordId(),
@@ -134,7 +140,32 @@ public class IngestService {
             }
         }
 
-        return res;
+        autologIngest(mergedMetadata, req.reviewOutcome(), out.recordId());
+        return out;
+    }
+
+    private void autologIngest(String mergedMetadata, String reviewOutcome, String recordId) {
+        MetadataUserRefs.UserTxn refs = MetadataUserRefs.parse(mergedMetadata, mapper);
+        String txn = refs.transactionId() != null && !refs.transactionId().isBlank()
+                ? refs.transactionId()
+                : "ingest:" + recordId;
+        activityLogService.tryAppendFromApi(
+                refs.userId(),
+                txn,
+                ingestOutcomeToBiz(reviewOutcome),
+                "add");
+    }
+
+    private static String ingestOutcomeToBiz(String reviewOutcome) {
+        if (reviewOutcome == null) {
+            return "pass";
+        }
+        return switch (reviewOutcome.toLowerCase(Locale.ROOT)) {
+            case "passed" -> "pass";
+            case "rejected" -> "reject";
+            case "frozen" -> "freeze";
+            default -> "pass";
+        };
     }
 
     private AzureOpenAiEmbeddingService.EmbeddingVector resolveEmbedding(String embedText) {

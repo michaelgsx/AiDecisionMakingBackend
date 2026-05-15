@@ -28,7 +28,10 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -54,13 +57,16 @@ class IngestServiceTest {
     @Mock
     private TransactionTemplate transactionTemplate;
 
+    @Mock
+    private ActivityLogService activityLogService;
+
     private IngestService service;
 
     @BeforeEach
     void setUp() {
         service = new IngestService(
                 ingestRepo, featureRepo, embeddingRepo, embeddingClient, openAi,
-                searchIngestService, search, mapper, transactionTemplate);
+                searchIngestService, search, mapper, transactionTemplate, activityLogService);
     }
 
     @SuppressWarnings("unchecked")
@@ -111,6 +117,11 @@ class IngestServiceTest {
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.any(AzureOpenAiEmbeddingService.EmbeddingVector.class));
+        verify(activityLogService).tryAppendFromApi(
+                eq("u9"),
+                argThat((String t) -> t.startsWith("ingest:")),
+                eq("pass"),
+                eq("add"));
     }
 
     @Test
@@ -132,6 +143,7 @@ class IngestServiceTest {
         verify(searchIngestService, never()).uploadIngestDocument(
                 any(), any(), any(), any(), any());
         verify(embeddingRepo, never()).save(any());
+        verify(activityLogService).tryAppendFromApi(isNull(), anyString(), eq("pass"), eq("add"));
     }
 
     @Test
@@ -143,6 +155,7 @@ class IngestServiceTest {
                 .hasMessageContaining("Azure OpenAI embedding is required");
 
         verify(ingestRepo, never()).save(any());
+        verify(activityLogService, never()).tryAppendFromApi(any(), any(), any(), any());
     }
 
     @Test
@@ -169,5 +182,6 @@ class IngestServiceTest {
         ArgumentCaptor<RiskIngestRecord> cap = ArgumentCaptor.forClass(RiskIngestRecord.class);
         verify(ingestRepo).save(cap.capture());
         verify(searchIngestService, never()).uploadIngestDocument(any(), any(), any(), any(), any());
+        verify(activityLogService, never()).tryAppendFromApi(any(), any(), any(), any());
     }
 }

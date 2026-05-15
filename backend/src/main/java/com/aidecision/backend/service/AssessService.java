@@ -5,6 +5,7 @@ import com.aidecision.backend.config.AzureSearchProperties;
 import com.aidecision.backend.dto.AssessRequest;
 import com.aidecision.backend.dto.AssessResponse;
 import com.aidecision.backend.dto.SimilarRecord;
+import com.aidecision.backend.support.MetadataUserRefs;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -15,6 +16,7 @@ import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 @Service
@@ -25,22 +27,28 @@ public class AssessService {
     private static final int SIMILAR_TOP = 8;
 
     private final AzureOpenAiEmbeddingService embeddingClient;
+    private final AzureOpenAiChatService chatService;
     private final AzureOpenAiProperties openAiProperties;
     private final AzureSearchQueryService searchQueryService;
     private final AzureSearchProperties searchProperties;
     private final ObjectMapper mapper;
+    private final ActivityLogService activityLogService;
 
     public AssessService(
             AzureOpenAiEmbeddingService embeddingClient,
+            AzureOpenAiChatService chatService,
             AzureOpenAiProperties openAiProperties,
             AzureSearchQueryService searchQueryService,
             AzureSearchProperties searchProperties,
-            ObjectMapper mapper) {
+            ObjectMapper mapper,
+            ActivityLogService activityLogService) {
         this.embeddingClient = embeddingClient;
+        this.chatService = chatService;
         this.openAiProperties = openAiProperties;
         this.searchQueryService = searchQueryService;
         this.searchProperties = searchProperties;
         this.mapper = mapper;
+        this.activityLogService = activityLogService;
     }
 
     public AssessResponse assess(AssessRequest req) {
@@ -49,7 +57,9 @@ public class AssessService {
                     "low",
                     "Azure AI Search is not configured (set AZURE_SEARCH_* or turn off AZURE_SEARCH_SKIP). "
                             + "Similar cases require the indexed ingest pipeline.",
-                    List.of()
+                    List.of(),
+                    null,
+                    null
             );
         }
 
@@ -62,7 +72,9 @@ public class AssessService {
             return new AssessResponse(
                     "low",
                     "Provide case notes or at least one risk feature to search for similar records.",
-                    List.of()
+                    List.of(),
+                    null,
+                    null
             );
         }
 
@@ -82,7 +94,9 @@ public class AssessService {
                     "low",
                     "Azure OpenAI embedding is not configured and no searchable text was provided. "
                             + "Add text/metadata or configure AZURE_OPENAI_* for vector similarity.",
-                    List.of()
+                    List.of(),
+                    null,
+                    null
             );
         }
 
@@ -113,7 +127,42 @@ public class AssessService {
                         maxScore
                 );
 
-        return new AssessResponse(risk, reason, similar);
+        String aiLabel = null;
+        String aiReason = null;
+        if (openAiProperties.chatConfigured()) {
+            try {
+                AzureOpenAiChatService.LabelDecision d =
+                        chatService.classifyWithSimilar(narrative, mergedMeta, similar);
+                aiLabel = d.label();
+                aiReason = d.reason();
+                risk = riskFromOutcomeLabel(aiLabel);
+            } catch (Exception e) {
+                log.warn("Assess chat step failed; returning search summary only: {}", e.getMessage());
+            }
+        }
+
+        autologAssess(mergedMeta, queryId);
+        return new AssessResponse(risk, reason, similar, aiLabel, aiReason);
+    }
+
+    private void autologAssess(String mergedMeta, String queryId) {
+        MetadataUserRefs.UserTxn refs = MetadataUserRefs.parse(mergedMeta, mapper);
+        String txn = refs.transactionId() != null && !refs.transactionId().isBlank()
+                ? refs.transactionId()
+                : queryId;
+        // "pass" = assessment API invoked (not a business approval decision).
+        activityLogService.tryAppendFromApi(refs.userId(), txn, "pass", "add");
+    }
+
+    private static String riskFromOutcomeLabel(String label) {
+        if (label == null || label.isBlank()) {
+            return "low";
+        }
+        return switch (label.toLowerCase(Locale.ROOT)) {
+            case "rejected" -> "high";
+            case "frozen" -> "medium";
+            default -> "low";
+        };
     }
 
     /** Aligns with ingest embedding text shape (review_outcome=unspecified for query). */

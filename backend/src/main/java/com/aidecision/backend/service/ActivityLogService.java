@@ -5,6 +5,8 @@ import com.aidecision.backend.dto.ActivityLogRequest;
 import com.aidecision.backend.dto.ActivityLogResponse;
 import com.aidecision.backend.entity.ActivityLog;
 import com.aidecision.backend.repository.ActivityLogRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -16,6 +18,8 @@ import java.util.List;
 
 @Service
 public class ActivityLogService {
+
+    private static final Logger log = LoggerFactory.getLogger(ActivityLogService.class);
 
     private static final String GENESIS_HASH = "0".repeat(64);
 
@@ -47,6 +51,33 @@ public class ActivityLogService {
         return new ActivityLogResponse(true, saved.getId(), hashCode, prevHash,
 
                 "Activity logged (" + req.bizAction() + "/" + req.recordAction() + ")");
+    }
+
+    /**
+     * Best-effort hash-chain append for server-side API flows (ingest / assess).
+     * Skips when {@code userId} is blank. Never throws to callers.
+     */
+    public void tryAppendFromApi(String userId, String transactionId, String bizAction, String recordAction) {
+        if (userId == null || userId.isBlank()) {
+            log.debug("Skipping activity autolog: blank userId");
+            return;
+        }
+        String uid = truncate(userId.trim(), 200);
+        String tid = (transactionId == null || transactionId.isBlank())
+                ? "api:" + System.currentTimeMillis()
+                : truncate(transactionId.trim(), 200);
+        try {
+            append(new ActivityLogRequest(uid, tid, bizAction, recordAction));
+        } catch (Exception e) {
+            log.warn("Activity autolog failed for user {}: {}", uid, e.getMessage());
+        }
+    }
+
+    private static String truncate(String s, int max) {
+        if (s.length() <= max) {
+            return s;
+        }
+        return s.substring(0, max);
     }
 
     public List<ActivityLogEntry> getByUser(String userId) {
