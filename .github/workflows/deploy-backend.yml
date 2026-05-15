@@ -8,6 +8,7 @@
 #     JSON: { "clientId": "…", "clientSecret": "…", "tenantId": "…", "subscriptionId": "…" }
 #     Same SP used by the frontend SWA workflow. The SP needs the
 #     "Website Contributor" role on the App Service (or the resource group).
+# Redeploy: push to v1 with this file or backend/** changes triggers CI.
 
 name: Deploy Java Backend (Azure App Service)
 
@@ -55,3 +56,4 @@ jobs:
       - name: Azure logout
         if: always()
         run: az logout || true
+
