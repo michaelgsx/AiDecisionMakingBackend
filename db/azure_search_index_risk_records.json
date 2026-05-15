@@ -1,0 +1,39 @@
+{
+  "name": "risk-records",
+  "fields": [
+    { "name": "id", "type": "Edm.String", "key": true, "filterable": true, "sortable": true },
+    { "name": "recordId", "type": "Edm.String", "searchable": true, "filterable": true },
+    { "name": "reviewOutcome", "type": "Edm.String", "filterable": true, "facetable": true },
+    { "name": "caseNotes", "type": "Edm.String", "searchable": true },
+    { "name": "metadataJson", "type": "Edm.String", "searchable": true },
+    { "name": "content", "type": "Edm.String", "searchable": true },
+    { "name": "userId", "type": "Edm.String", "filterable": true, "sortable": false },
+    { "name": "scenario", "type": "Edm.String", "filterable": true, "facetable": true },
+    { "name": "transactionId", "type": "Edm.String", "filterable": true },
+    { "name": "embeddingModel", "type": "Edm.String", "filterable": true, "sortable": false },
+    { "name": "embeddingDimensions", "type": "Edm.Int32", "filterable": true, "sortable": false },
+    {
+      "name": "contentVector",
+      "type": "Collection(Edm.Single)",
+      "searchable": true,
+      "retrievable": true,
+      "dimensions": 1536,
+      "vectorSearchProfile": "risk-vector-profile"
+    }
+  ],
+  "vectorSearch": {
+    "algorithms": [
+      {
+        "name": "risk-hnsw",
+        "kind": "hnsw",
+        "hnswParameters": {
+          "metric": "cosine",
+          "m": 4,
+          "efConstruction": 400,
+          "efSearch": 500
+        }
+      }
+    ],
+    "profiles": [{ "name": "risk-vector-profile", "algorithm": "risk-hnsw" }]
+  }
+}
