@@ -4,7 +4,6 @@ import com.aidecision.backend.config.AzureOpenAiProperties;
 import com.aidecision.backend.config.AzureSearchProperties;
 import com.aidecision.backend.dto.AssessRequest;
 import com.aidecision.backend.dto.AssessResponse;
-import com.aidecision.backend.dto.SimilarRecord;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -93,14 +92,17 @@ class AssessServiceTest {
         when(searchQueryService.searchSimilar(org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.eq(8)))
                 .thenReturn(List.of(
-                        new AzureSearchQueryService.SimilarHit("rid-1", "[passed] hello", 0.91),
-                        new AzureSearchQueryService.SimilarHit("rid-2", "[rejected] x", 0.5)
+                        AzureSearchQueryService.SimilarHit.forTest("rid-1", "[passed] hello", 0.91),
+                        AzureSearchQueryService.SimilarHit.forTest("rid-2", "[rejected] x", 0.5)
                 ));
 
         AssessResponse res = service.assess(new AssessRequest("case text", "{\"user_id\":\"u1\"}"));
 
         assertThat(res.similarRecords()).hasSize(2);
-        assertThat(res.similarRecords().get(0)).isEqualTo(new SimilarRecord("rid-1", "[passed] hello", 0.91));
+        assertThat(res.similarRecords().get(0).id()).isEqualTo("rid-1");
+        assertThat(res.similarRecords().get(0).snippet()).isEqualTo("[passed] hello");
+        assertThat(res.similarRecords().get(0).score()).isEqualTo(0.91);
+        assertThat(res.similarRecords().get(0).readableText()).contains("Similar record");
         assertThat(res.reason()).contains("hybrid");
         assertThat(res.risk()).isEqualTo("high");
         assertThat(res.aiLabel()).isNull();
@@ -128,7 +130,7 @@ class AssessServiceTest {
         when(embeddingClient.embed(org.mockito.ArgumentMatchers.anyString()))
                 .thenReturn(new AzureOpenAiEmbeddingService.EmbeddingVector(List.of(0.1), "m"));
         when(searchQueryService.searchSimilar(anyString(), anyList(), org.mockito.ArgumentMatchers.eq(8)))
-                .thenReturn(List.of(new AzureSearchQueryService.SimilarHit("a", "snip", 0.9)));
+                .thenReturn(List.of(AzureSearchQueryService.SimilarHit.forTest("a", "snip", 0.9)));
         when(chatService.classifyWithSimilar(anyString(), anyString(), anyList()))
                 .thenReturn(new AzureOpenAiChatService.LabelDecision("rejected", "Pattern matches prior rejects."));
 

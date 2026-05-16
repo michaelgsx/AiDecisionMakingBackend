@@ -33,7 +33,7 @@ class AssessControllerTest {
     @Test
     void assessReturnsBody() throws Exception {
         when(assessService.assess(any(AssessRequest.class)))
-                .thenReturn(new AssessResponse("low", "because", List.of(new SimilarRecord("r1", "snip", 0.9)), null, null));
+                .thenReturn(new AssessResponse("low", "because", List.of(SimilarRecord.ofSnippet("r1", "snip", 0.9)), null, null));
 
         mockMvc.perform(post("/rag/assess")
                         .contentType(MediaType.APPLICATION_JSON)

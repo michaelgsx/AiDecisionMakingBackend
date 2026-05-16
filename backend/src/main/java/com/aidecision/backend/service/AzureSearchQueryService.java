@@ -33,7 +33,25 @@ public class AzureSearchQueryService {
         this.http = http;
     }
 
-    public record SimilarHit(String id, String snippet, double score) {}
+    /** One hit from Search; {@code id} is the preferred business id (recordId or index id). */
+    public record SimilarHit(
+            String id,
+            String snippet,
+            double score,
+            String recordId,
+            String reviewOutcome,
+            String caseNotes,
+            String metadataJson,
+            String content,
+            String userId,
+            String scenario,
+            String transactionId
+    ) {
+        /** Minimal hit for tests (other fields blank). */
+        public static SimilarHit forTest(String id, String snippet, double score) {
+            return new SimilarHit(id, snippet, score, "", "", "", "", "", "", "", "");
+        }
+    }
 
     /**
      * @param lexicalQuery BM25 text (case notes + metadata excerpt); may be blank for vector-only
@@ -53,7 +71,9 @@ public class AzureSearchQueryService {
         root.put("top", top);
         root.put("count", true);
         // REST API expects comma-separated string, not a JSON array (array → HTTP 400 StartArray vs PrimitiveValue).
-        root.put("select", "id,recordId,reviewOutcome,caseNotes,metadataJson,content");
+        root.put(
+                "select",
+                "id,recordId,reviewOutcome,caseNotes,metadataJson,content,userId,scenario,transactionId");
 
         String lex = lexicalQuery != null ? lexicalQuery.trim() : "";
         if (!lex.isEmpty()) {
@@ -119,12 +139,22 @@ public class AzureSearchQueryService {
                 return out;
             }
             for (JsonNode doc : values) {
-                String id = textOrEmpty(doc.path("recordId")).isBlank()
-                        ? textOrEmpty(doc.path("id"))
-                        : textOrEmpty(doc.path("recordId"));
+                String rid = textOrEmpty(doc.path("recordId"));
+                String id = !rid.isBlank() ? rid : textOrEmpty(doc.path("id"));
                 double score = scoreOf(doc);
                 String snippet = buildSnippet(doc);
-                out.add(new SimilarHit(id, snippet, score));
+                out.add(new SimilarHit(
+                        id,
+                        snippet,
+                        score,
+                        rid,
+                        textOrEmpty(doc.path("reviewOutcome")),
+                        textOrEmpty(doc.path("caseNotes")),
+                        textOrEmpty(doc.path("metadataJson")),
+                        textOrEmpty(doc.path("content")),
+                        textOrEmpty(doc.path("userId")),
+                        textOrEmpty(doc.path("scenario")),
+                        textOrEmpty(doc.path("transactionId"))));
             }
             return out;
         } catch (IllegalStateException e) {

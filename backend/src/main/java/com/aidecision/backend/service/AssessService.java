@@ -25,6 +25,8 @@ public class AssessService {
     private static final Logger log = LoggerFactory.getLogger(AssessService.class);
 
     private static final int SIMILAR_TOP = 8;
+    /** Max chars per large field inside {@link SimilarRecord#readableText()} (full JSON still in raw fields). */
+    private static final int READABLE_SECTION_CAP = 12_000;
 
     private final AzureOpenAiEmbeddingService embeddingClient;
     private final AzureOpenAiChatService chatService;
@@ -111,8 +113,7 @@ public class AssessService {
         List<SimilarRecord> similar = new ArrayList<>();
         double maxScore = 0;
         for (AzureSearchQueryService.SimilarHit h : hits) {
-            String id = h.id() != null && !h.id().isBlank() ? h.id() : null;
-            similar.add(new SimilarRecord(id, h.snippet(), h.score()));
+            similar.add(toSimilarRecord(h));
             maxScore = Math.max(maxScore, h.score());
         }
 
@@ -152,6 +153,68 @@ public class AssessService {
                 : queryId;
         // "pass" = assessment API invoked (not a business approval decision).
         activityLogService.tryAppendFromApi(refs.userId(), txn, "pass", "add");
+    }
+
+    private static SimilarRecord toSimilarRecord(AzureSearchQueryService.SimilarHit h) {
+        String displayId = h.id() != null && !h.id().isBlank() ? h.id() : null;
+        String readable = formatReadableSimilar(h);
+        return new SimilarRecord(
+                displayId,
+                h.snippet(),
+                h.score(),
+                blankToNull(h.recordId()),
+                blankToNull(h.reviewOutcome()),
+                blankToNull(h.caseNotes()),
+                blankToNull(h.metadataJson()),
+                blankToNull(h.content()),
+                blankToNull(h.userId()),
+                blankToNull(h.scenario()),
+                blankToNull(h.transactionId()),
+                readable);
+    }
+
+    private static String blankToNull(String s) {
+        if (s == null || s.isBlank()) {
+            return null;
+        }
+        return s;
+    }
+
+    private static String formatReadableSimilar(AzureSearchQueryService.SimilarHit h) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== Similar record ===\n");
+        sb.append("record_id: ").append(h.id() != null && !h.id().isBlank() ? h.id() : "(unknown)").append('\n');
+        sb.append("review_outcome: ").append(h.reviewOutcome() == null || h.reviewOutcome().isBlank()
+                ? "(unknown)"
+                : h.reviewOutcome()).append('\n');
+        sb.append("azure_search_score: ").append(String.format(Locale.ROOT, "%.6f", h.score())).append('\n');
+        if (h.userId() != null && !h.userId().isBlank()) {
+            sb.append("user_id: ").append(h.userId()).append('\n');
+        }
+        if (h.scenario() != null && !h.scenario().isBlank()) {
+            sb.append("scenario: ").append(h.scenario()).append('\n');
+        }
+        if (h.transactionId() != null && !h.transactionId().isBlank()) {
+            sb.append("transaction_id: ").append(h.transactionId()).append('\n');
+        }
+        sb.append('\n');
+        appendReadableSection(sb, "Case notes", h.caseNotes());
+        appendReadableSection(sb, "Risk features (metadata JSON)", h.metadataJson());
+        appendReadableSection(sb, "Indexed content (full text used for embedding / hybrid search)", h.content());
+        sb.append("--- One-line preview ---\n").append(h.snippet() != null ? h.snippet().trim() : "").append('\n');
+        return sb.toString().trim();
+    }
+
+    private static void appendReadableSection(StringBuilder sb, String title, String body) {
+        sb.append("-- ").append(title).append(" --\n");
+        if (body == null || body.isBlank()) {
+            sb.append("(none)\n\n");
+            return;
+        }
+        String t = body.length() > READABLE_SECTION_CAP
+                ? body.substring(0, READABLE_SECTION_CAP) + "\n… (truncated in readableText; see JSON fields for full text)"
+                : body;
+        sb.append(t).append("\n\n");
     }
 
     private static String riskFromOutcomeLabel(String label) {

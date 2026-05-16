@@ -71,7 +71,7 @@ class AzureOpenAiChatServiceTest {
             AzureOpenAiChatService.LabelDecision d = service.classifyWithSimilar(
                     "notes",
                     "{\"a\":1}",
-                    List.of(new SimilarRecord("r1", "[passed] x", 0.9)));
+                    List.of(SimilarRecord.ofSnippet("r1", "[passed] x", 0.9)));
 
             assertThat(d.label()).isEqualTo("passed");
             assertThat(d.reason()).contains("similar cases");
