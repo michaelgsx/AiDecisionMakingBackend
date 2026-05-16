@@ -89,8 +89,7 @@ class AssessServiceTest {
         when(embeddingClient.embed(org.mockito.ArgumentMatchers.anyString()))
                 .thenReturn(new AzureOpenAiEmbeddingService.EmbeddingVector(List.of(0.1, 0.2, 0.3), "m"));
 
-        when(searchQueryService.searchSimilar(org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.eq(8)))
+        when(searchQueryService.searchSimilar(anyString(), anyList(), any(), eq(8)))
                 .thenReturn(List.of(
                         AzureSearchQueryService.SimilarHit.forTest("rid-1", "[passed] hello", 0.91),
                         AzureSearchQueryService.SimilarHit.forTest("rid-2", "[rejected] x", 0.5)
@@ -129,7 +128,7 @@ class AssessServiceTest {
 
         when(embeddingClient.embed(org.mockito.ArgumentMatchers.anyString()))
                 .thenReturn(new AzureOpenAiEmbeddingService.EmbeddingVector(List.of(0.1), "m"));
-        when(searchQueryService.searchSimilar(anyString(), anyList(), org.mockito.ArgumentMatchers.eq(8)))
+        when(searchQueryService.searchSimilar(anyString(), anyList(), any(), eq(8)))
                 .thenReturn(List.of(AzureSearchQueryService.SimilarHit.forTest("a", "snip", 0.9)));
         when(chatService.classifyWithSimilar(anyString(), anyString(), anyList()))
                 .thenReturn(new AzureOpenAiChatService.LabelDecision("rejected", "Pattern matches prior rejects."));
@@ -150,8 +149,7 @@ class AssessServiceTest {
         search.setIndexName("risk-records");
         openAi.setSkipEmbedding(true);
 
-        when(searchQueryService.searchSimilar(org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.eq(8)))
+        when(searchQueryService.searchSimilar(anyString(), isNull(), isNull(), eq(8)))
                 .thenReturn(List.of());
 
         AssessResponse res = service.assess(new AssessRequest("only text", null));
@@ -172,10 +170,7 @@ class AssessServiceTest {
 
         when(embeddingClient.embed(org.mockito.ArgumentMatchers.anyString()))
                 .thenReturn(new AzureOpenAiEmbeddingService.EmbeddingVector(List.of(1.0), "m"));
-        when(searchQueryService.searchSimilar(
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyList(),
-                org.mockito.ArgumentMatchers.eq(8)))
+        when(searchQueryService.searchSimilar(anyString(), anyList(), any(), eq(8)))
                 .thenThrow(new IllegalStateException("search down"));
 
         assertThatThrownBy(() -> service.assess(new AssessRequest("text", null)))

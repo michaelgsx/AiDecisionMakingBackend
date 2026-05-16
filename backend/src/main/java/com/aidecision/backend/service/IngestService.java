@@ -11,6 +11,7 @@ import com.aidecision.backend.repository.RiskEmbeddingRepository;
 import com.aidecision.backend.repository.RiskFeatureRepository;
 import com.aidecision.backend.repository.RiskIngestRecordRepository;
 import com.aidecision.backend.support.MetadataUserRefs;
+import com.aidecision.backend.support.TextFeatureSupport;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -31,6 +32,7 @@ public class IngestService {
     private static final Logger log = LoggerFactory.getLogger(IngestService.class);
 
     private static final String EMBEDDING_TYPE_RECORD = "feature";
+    private static final String EMBEDDING_TYPE_TEXT = "text_combined";
 
     private final RiskIngestRecordRepository ingestRepo;
     private final RiskFeatureRepository featureRepo;
@@ -72,7 +74,8 @@ public class IngestService {
 
         String embedText = buildRecordTextForEmbedding(req.text(), mergedMetadata, req.reviewOutcome(), recordId);
 
-        final AzureOpenAiEmbeddingService.EmbeddingVector embeddingVector = resolveEmbedding(embedText);
+        final AzureOpenAiEmbeddingService.EmbeddingVector caseVector = resolveEmbedding(embedText);
+        final AzureOpenAiEmbeddingService.EmbeddingVector textVector = resolveTextEmbedding(req.text(), mergedMetadata);
 
         IngestResponse res = transactionTemplate.execute(status -> {
             RiskFeature feature = new RiskFeature();
@@ -90,18 +93,14 @@ public class IngestService {
             RiskIngestRecord saved = ingestRepo.save(entity);
 
             String extraMsg = "";
-            if (embeddingVector != null) {
+            if (caseVector != null) {
                 try {
-                    String json = mapper.writeValueAsString(embeddingVector.values());
-                    RiskEmbedding emb = new RiskEmbedding();
-                    emb.setRequestId(recordId);
-                    emb.setEmbeddingType(EMBEDDING_TYPE_RECORD);
-                    emb.setEmbeddingJson(json);
-                    emb.setDimensions(embeddingVector.dimensions());
-                    emb.setModelName(truncate(embeddingVector.modelName(), 200));
-                    emb.setModelVersion(openAiProperties.getApiVersion());
-                    embeddingRepo.save(emb);
-                    extraMsg = "; embedding " + embeddingVector.dimensions() + "-dim";
+                    persistEmbedding(recordId, EMBEDDING_TYPE_RECORD, caseVector);
+                    extraMsg = "; embedding " + caseVector.dimensions() + "-dim";
+                    if (textVector != null) {
+                        persistEmbedding(recordId, EMBEDDING_TYPE_TEXT, textVector);
+                        extraMsg += " + textVector";
+                    }
                 } catch (Exception e) {
                     status.setRollbackOnly();
                     throw new IllegalStateException("Failed to persist embedding JSON", e);
@@ -121,7 +120,7 @@ public class IngestService {
         }
 
         IngestResponse out = res;
-        if (embeddingVector != null) {
+        if (caseVector != null) {
             if (searchProperties.isSkip()) {
                 log.info("Skipping Azure AI Search (AZURE_SEARCH_SKIP=true)");
             } else if (!searchProperties.searchConfigured()) {
@@ -131,12 +130,13 @@ public class IngestService {
                                 + "AZURE_SEARCH_INDEX_NAME (default risk-records), "
                                 + "or set AZURE_SEARCH_SKIP=true to skip indexing.");
             } else {
-                searchIngestService.uploadIngestDocument(recordId, req, mergedMetadata, embedText, embeddingVector);
+                searchIngestService.uploadIngestDocument(
+                        recordId, req, mergedMetadata, embedText, caseVector, textVector);
                 out = new IngestResponse(
                         res.ok(),
                         res.recordIndex(),
                         res.recordId(),
-                        res.message() + "; Azure AI Search indexed");
+                        res.message() + "; Azure AI Search indexed (dual-vector)");
             }
         }
 
@@ -166,6 +166,30 @@ public class IngestService {
             case "frozen" -> "freeze";
             default -> "pass";
         };
+    }
+
+    private void persistEmbedding(
+            String recordId, String type, AzureOpenAiEmbeddingService.EmbeddingVector vector) throws Exception {
+        String json = mapper.writeValueAsString(vector.values());
+        RiskEmbedding emb = new RiskEmbedding();
+        emb.setRequestId(recordId);
+        emb.setEmbeddingType(type);
+        emb.setEmbeddingJson(json);
+        emb.setDimensions(vector.dimensions());
+        emb.setModelName(truncate(vector.modelName(), 200));
+        emb.setModelVersion(openAiProperties.getApiVersion());
+        embeddingRepo.save(emb);
+    }
+
+    private AzureOpenAiEmbeddingService.EmbeddingVector resolveTextEmbedding(String caseNotes, String mergedMetadata) {
+        if (openAiProperties.isSkipEmbedding() || !openAiProperties.embeddingConfigured()) {
+            return null;
+        }
+        String blob = TextFeatureSupport.buildTextBlob(caseNotes, mergedMetadata, mapper);
+        if (blob == null || blob.isBlank()) {
+            return null;
+        }
+        return embeddingClient.embed(blob);
     }
 
     private AzureOpenAiEmbeddingService.EmbeddingVector resolveEmbedding(String embedText) {

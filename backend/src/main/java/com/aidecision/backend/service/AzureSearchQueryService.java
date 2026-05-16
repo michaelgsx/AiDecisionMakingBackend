@@ -54,11 +54,15 @@ public class AzureSearchQueryService {
     }
 
     /**
-     * @param lexicalQuery BM25 text (case notes + metadata excerpt); may be blank for vector-only
-     * @param queryVector  embedding from Azure OpenAI; may be null for lexical-only
-     * @param top          max documents to return
+     * Hybrid search with optional dual vectors and configurable weights.
+     *
+     * @param lexicalQuery BM25 text; may be blank for vector-only
+     * @param caseVector   query embedding for {@link com.aidecision.backend.config.AzureSearchProperties#getVectorFieldCase()}
+     * @param textVector   query embedding for NL field; may be null
+     * @param top          max documents
      */
-    public List<SimilarHit> searchSimilar(String lexicalQuery, List<Double> queryVector, int top) {
+    public List<SimilarHit> searchSimilar(
+            String lexicalQuery, List<Double> caseVector, List<Double> textVector, int top) {
         if (!props.searchConfigured() || props.isSkip()) {
             throw new IllegalStateException("Azure AI Search is not configured for queries.");
         }
@@ -80,18 +84,25 @@ public class AzureSearchQueryService {
             root.put("search", lex);
         }
 
-        if (queryVector != null && !queryVector.isEmpty()) {
-            ArrayNode vec = mapper.createArrayNode();
-            for (double d : queryVector) {
-                vec.add(d);
-            }
-            ObjectNode vq = mapper.createObjectNode();
-            vq.put("kind", "vector");
-            vq.set("vector", vec);
-            vq.put("fields", "contentVector");
-            vq.put("k", Math.max(top * 4, 20));
+        boolean hasCase = caseVector != null && !caseVector.isEmpty();
+        boolean hasText = textVector != null && !textVector.isEmpty();
+        if (hasCase || hasText) {
             ArrayNode vqs = mapper.createArrayNode();
-            vqs.add(vq);
+            int k = Math.max(top * 4, 20);
+            if (hasCase) {
+                vqs.add(buildVectorQuery(
+                        caseVector,
+                        props.getVectorFieldCase(),
+                        props.normalizedCaseWeight(true, hasText),
+                        k));
+            }
+            if (hasText) {
+                vqs.add(buildVectorQuery(
+                        textVector,
+                        props.getVectorFieldText(),
+                        props.normalizedTextWeight(hasCase, true),
+                        k));
+            }
             root.set("vectorQueries", vqs);
         }
 
@@ -162,6 +173,22 @@ public class AzureSearchQueryService {
         } catch (Exception e) {
             throw new IllegalStateException("Failed to parse search response", e);
         }
+    }
+
+    private ObjectNode buildVectorQuery(List<Double> vector, String field, double weight, int k) {
+        ArrayNode vec = mapper.createArrayNode();
+        for (double d : vector) {
+            vec.add(d);
+        }
+        ObjectNode vq = mapper.createObjectNode();
+        vq.put("kind", "vector");
+        vq.set("vector", vec);
+        vq.put("fields", field);
+        vq.put("k", k);
+        if (weight > 0) {
+            vq.put("weight", weight);
+        }
+        return vq;
     }
 
     private static double scoreOf(JsonNode doc) {

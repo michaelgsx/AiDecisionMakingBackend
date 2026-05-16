@@ -33,6 +33,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -110,12 +111,13 @@ class IngestServiceTest {
         assertThat(res.message()).contains("embedding 2-dim");
 
         verify(featureRepo).save(any(RiskFeature.class));
-        verify(embeddingRepo).save(any(RiskEmbedding.class));
+        verify(embeddingRepo, times(2)).save(any(RiskEmbedding.class));
         verify(searchIngestService).uploadIngestDocument(
                 eq(res.recordId()),
                 eq(req),
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(AzureOpenAiEmbeddingService.EmbeddingVector.class),
                 org.mockito.ArgumentMatchers.any(AzureOpenAiEmbeddingService.EmbeddingVector.class));
         verify(activityLogService).tryAppendFromApi(
                 eq("u9"),

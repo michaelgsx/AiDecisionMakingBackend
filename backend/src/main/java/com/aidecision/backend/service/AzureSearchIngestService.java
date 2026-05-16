@@ -18,7 +18,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * Pushes ingest documents to Azure AI Search for hybrid (lexical + vector) retrieval.
+ * Pushes ingest documents to Azure AI Search for hybrid (lexical + dual-vector) retrieval.
  */
 @Service
 public class AzureSearchIngestService {
@@ -36,26 +36,37 @@ public class AzureSearchIngestService {
     }
 
     /**
-     * Upload or merge-replace one document. Call after DB commit.
-     *
-     * @param mergedText same blob used for embedding (good lexical coverage for hybrid)
+     * Upload with case (full-record) embedding only; textVector omitted.
      */
     public void uploadIngestDocument(
             String recordId,
             IngestRequest req,
             String mergedMetadataJson,
             String mergedText,
-            AzureOpenAiEmbeddingService.EmbeddingVector vector) {
+            AzureOpenAiEmbeddingService.EmbeddingVector caseVector) {
+        uploadIngestDocument(recordId, req, mergedMetadataJson, mergedText, caseVector, null);
+    }
+
+    /**
+     * @param caseVector embedding of full record blob → {@code contentVector}
+     * @param textVector embedding of NL fields only → {@code textVector}; may be null
+     */
+    public void uploadIngestDocument(
+            String recordId,
+            IngestRequest req,
+            String mergedMetadataJson,
+            String mergedText,
+            AzureOpenAiEmbeddingService.EmbeddingVector caseVector,
+            AzureOpenAiEmbeddingService.EmbeddingVector textVector) {
 
         if (!props.shouldUploadDocuments()) {
             return;
         }
+        if (caseVector == null) {
+            throw new IllegalArgumentException("caseVector is required for Azure AI Search upload");
+        }
 
         String caseNotes = req.text() != null && !req.text().isBlank() ? req.text().trim() : "";
-
-        List<Float> vecFloats = vector.values().stream()
-                .map(Double::floatValue)
-                .collect(Collectors.toCollection(ArrayList::new));
 
         Map<String, Object> doc = new LinkedHashMap<>();
         doc.put("@search.action", "upload");
@@ -65,9 +76,13 @@ public class AzureSearchIngestService {
         doc.put("caseNotes", caseNotes);
         doc.put("metadataJson", mergedMetadataJson != null ? mergedMetadataJson : "{}");
         doc.put("content", mergedText != null ? mergedText : "");
-        doc.put("embeddingModel", truncate(vector.modelName(), 200));
-        doc.put("embeddingDimensions", vector.dimensions());
-        doc.put("contentVector", vecFloats);
+        doc.put("embeddingModel", truncate(caseVector.modelName(), 200));
+        doc.put("embeddingDimensions", caseVector.dimensions());
+        doc.put(props.getVectorFieldCase(), toFloats(caseVector.values()));
+
+        if (textVector != null && !textVector.values().isEmpty()) {
+            doc.put(props.getVectorFieldText(), toFloats(textVector.values()));
+        }
 
         String userId = "";
         String scenario = "";
@@ -85,6 +100,10 @@ public class AzureSearchIngestService {
         doc.put("scenario", scenario);
         doc.put("transactionId", transactionId);
 
+        postIndexBatch(doc);
+    }
+
+    private void postIndexBatch(Map<String, Object> doc) {
         Map<String, Object> envelope = Map.of("value", List.of(doc));
         String body;
         try {
@@ -124,6 +143,10 @@ public class AzureSearchIngestService {
         } catch (Exception e) {
             throw new IllegalStateException("Azure AI Search request failed: " + e.getMessage(), e);
         }
+    }
+
+    private static List<Float> toFloats(List<Double> values) {
+        return values.stream().map(Double::floatValue).collect(Collectors.toCollection(ArrayList::new));
     }
 
     private static String textField(JsonNode parent, String key) {

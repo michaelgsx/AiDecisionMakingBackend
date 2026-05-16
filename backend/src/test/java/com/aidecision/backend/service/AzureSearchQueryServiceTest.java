@@ -55,7 +55,7 @@ class AzureSearchQueryServiceTest {
                         MediaType.APPLICATION_JSON));
 
         List<AzureSearchQueryService.SimilarHit> hits =
-                service.searchSimilar("query text", List.of(0.1, 0.2), 5);
+                service.searchSimilar("query text", List.of(0.1, 0.2), null, 5);
 
         assertThat(hits).hasSize(1);
         assertThat(hits.get(0).id()).isEqualTo("r1");

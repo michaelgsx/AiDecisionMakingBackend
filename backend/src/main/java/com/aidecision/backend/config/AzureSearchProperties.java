@@ -19,6 +19,17 @@ public class AzureSearchProperties {
     /** When true, do not push documents (local dev). */
     private boolean skip = false;
 
+    /** Index vector field for full-case embedding (notes + metadata blob). */
+    private String vectorFieldCase = "contentVector";
+
+    /** Index vector field for NL-only embedding (email + conversation). */
+    private String vectorFieldText = "textVector";
+
+    /** Relative weight in multi-vector hybrid query (see AZURE_SEARCH_VECTOR_WEIGHT_*). */
+    private double vectorWeightCase = 0.6;
+
+    private double vectorWeightText = 0.4;
+
     public String getEndpoint() { return endpoint; }
     public void setEndpoint(String endpoint) {
         this.endpoint = endpoint == null ? "" : endpoint.trim();
@@ -49,5 +60,52 @@ public class AzureSearchProperties {
     /** Upload to AI Search when we have an embedding and config is present. */
     public boolean shouldUploadDocuments() {
         return !skip && searchConfigured();
+    }
+
+    public String getVectorFieldCase() { return vectorFieldCase; }
+    public void setVectorFieldCase(String vectorFieldCase) {
+        this.vectorFieldCase = vectorFieldCase == null || vectorFieldCase.isBlank()
+                ? "contentVector" : vectorFieldCase.trim();
+    }
+
+    public String getVectorFieldText() { return vectorFieldText; }
+    public void setVectorFieldText(String vectorFieldText) {
+        this.vectorFieldText = vectorFieldText == null || vectorFieldText.isBlank()
+                ? "textVector" : vectorFieldText.trim();
+    }
+
+    public double getVectorWeightCase() { return vectorWeightCase; }
+    public void setVectorWeightCase(double vectorWeightCase) { this.vectorWeightCase = vectorWeightCase; }
+
+    public double getVectorWeightText() { return vectorWeightText; }
+    public void setVectorWeightText(double vectorWeightText) { this.vectorWeightText = vectorWeightText; }
+
+    /** Weights for active vector queries, normalized to sum to 1. */
+    public double normalizedCaseWeight(boolean casePresent, boolean textPresent) {
+        if (!casePresent && !textPresent) {
+            return 0;
+        }
+        if (casePresent && !textPresent) {
+            return 1.0;
+        }
+        if (!casePresent && textPresent) {
+            return 0;
+        }
+        double sum = Math.max(1e-9, vectorWeightCase + vectorWeightText);
+        return vectorWeightCase / sum;
+    }
+
+    public double normalizedTextWeight(boolean casePresent, boolean textPresent) {
+        if (!casePresent && !textPresent) {
+            return 0;
+        }
+        if (!casePresent && textPresent) {
+            return 1.0;
+        }
+        if (casePresent && !textPresent) {
+            return 0;
+        }
+        double sum = Math.max(1e-9, vectorWeightCase + vectorWeightText);
+        return vectorWeightText / sum;
     }
 }

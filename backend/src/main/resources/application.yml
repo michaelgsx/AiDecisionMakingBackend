@@ -43,3 +43,8 @@ app:
     api-version: ${AZURE_SEARCH_API_VERSION:2024-07-01}
     # true = do not push to AI Search (local dev).
     skip: ${AZURE_SEARCH_SKIP:false}
+    vector-field-case: contentVector
+    vector-field-text: textVector
+    # Hybrid vector query weights (relative; normalized when both are present).
+    vector-weight-case: ${AZURE_SEARCH_VECTOR_WEIGHT_CASE:0.6}
+    vector-weight-text: ${AZURE_SEARCH_VECTOR_WEIGHT_TEXT:0.4}

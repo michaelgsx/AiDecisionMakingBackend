@@ -6,6 +6,7 @@ import com.aidecision.backend.dto.AssessRequest;
 import com.aidecision.backend.dto.AssessResponse;
 import com.aidecision.backend.dto.SimilarRecord;
 import com.aidecision.backend.support.MetadataUserRefs;
+import com.aidecision.backend.support.TextFeatureSupport;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -84,10 +85,15 @@ public class AssessService {
         String embedText = buildAssessEmbedText(narrative, mergedMeta, queryId);
         String lexical = buildLexicalQuery(narrative, mergedMeta);
 
-        List<Double> vector = null;
+        List<Double> caseVector = null;
+        List<Double> textVector = null;
         if (openAiProperties.embeddingConfigured() && !openAiProperties.isSkipEmbedding()) {
             try {
-                vector = embeddingClient.embed(embedText).values();
+                caseVector = embeddingClient.embed(embedText).values();
+                String textBlob = TextFeatureSupport.buildTextBlob(narrative, mergedMeta, mapper);
+                if (textBlob != null && !textBlob.isBlank()) {
+                    textVector = embeddingClient.embed(textBlob).values();
+                }
             } catch (Exception e) {
                 log.warn("Embedding failed; falling back to lexical-only search: {}", e.getMessage());
             }
@@ -104,7 +110,7 @@ public class AssessService {
 
         List<AzureSearchQueryService.SimilarHit> hits;
         try {
-            hits = searchQueryService.searchSimilar(lexical, vector, SIMILAR_TOP);
+            hits = searchQueryService.searchSimilar(lexical, caseVector, textVector, SIMILAR_TOP);
         } catch (Exception e) {
             log.error("Azure AI Search assess failed", e);
             throw new IllegalStateException(e.getMessage() != null ? e.getMessage() : "Search failed", e);
@@ -118,7 +124,7 @@ public class AssessService {
         }
 
         String risk = similar.isEmpty() ? "low" : (maxScore >= 0.75 ? "high" : "low");
-        String mode = vector != null ? "hybrid (lexical + vector)" : "lexical";
+        String mode = describeSearchMode(caseVector, textVector);
         String reason = similar.isEmpty()
                 ? "No indexed cases matched this query yet. Ingest a few records into Azure AI Search first."
                 : String.format(
@@ -215,6 +221,22 @@ public class AssessService {
                 ? body.substring(0, READABLE_SECTION_CAP) + "\n… (truncated in readableText; see JSON fields for full text)"
                 : body;
         sb.append(t).append("\n\n");
+    }
+
+    private String describeSearchMode(List<Double> caseVector, List<Double> textVector) {
+        boolean hasCase = caseVector != null && !caseVector.isEmpty();
+        boolean hasText = textVector != null && !textVector.isEmpty();
+        if (!hasCase && !hasText) {
+            return "lexical";
+        }
+        if (hasCase && hasText) {
+            return String.format(
+                    Locale.ROOT,
+                    "hybrid lexical + dual-vector (case %.2f, text %.2f)",
+                    searchProperties.normalizedCaseWeight(true, true),
+                    searchProperties.normalizedTextWeight(true, true));
+        }
+        return hasCase ? "hybrid lexical + case vector" : "hybrid lexical + text vector";
     }
 
     private static String riskFromOutcomeLabel(String label) {

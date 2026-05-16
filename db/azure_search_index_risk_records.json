@@ -18,7 +18,15 @@
       "searchable": true,
       "retrievable": true,
       "dimensions": 1536,
-      "vectorSearchProfile": "risk-vector-profile"
+      "vectorSearchProfile": "risk-case-vector-profile"
+    },
+    {
+      "name": "textVector",
+      "type": "Collection(Edm.Single)",
+      "searchable": true,
+      "retrievable": true,
+      "dimensions": 1536,
+      "vectorSearchProfile": "risk-text-vector-profile"
     }
   ],
   "vectorSearch": {
@@ -34,6 +42,9 @@
         }
       }
     ],
-    "profiles": [{ "name": "risk-vector-profile", "algorithm": "risk-hnsw" }]
+    "profiles": [
+      { "name": "risk-case-vector-profile", "algorithm": "risk-hnsw" },
+      { "name": "risk-text-vector-profile", "algorithm": "risk-hnsw" }
+    ]
   }
 }
