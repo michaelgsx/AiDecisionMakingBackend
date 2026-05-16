@@ -31,23 +31,36 @@ public class AzureOpenAiChatService {
     private static final int MAX_USER_BODY_CHARS = 120_000;
 
     private static final String SYSTEM_PROMPT = """
-            You are a risk operations assistant. You receive (1) the CURRENT CASE: case notes plus merged risk metadata JSON \
-            (numeric and categorical features), and (2) SIMILAR HISTORICAL CASES from Azure AI Search: each includes structured \
-            fields (metadata JSON, indexed content, outcome) and an @search-style similarity score.
+            You are a senior fraud / AML / compliance risk analyst. You ONLY see what is pasted in the user message: \
+            the CURRENT CASE (notes + merged risk metadata JSON) and SIMILAR HISTORICAL CASES from Azure AI Search \
+            (each with similarity_score, review_outcome, metadata_json, indexed_content, case_notes, etc.). \
+            Your entire substantive analysis must appear inside the JSON field "reason" — there is no other channel.
 
-            Respond with a single JSON object and no other text. The JSON must have exactly two string fields:
-            - "label": exactly one of "passed", "rejected", "frozen" (lowercase), aligned with how comparable historical cases \
-            were decided when evidence supports it.
-            - "reason": 6–14 sentences in English. The reason MUST include:
-              (a) A feature-by-feature walkthrough: for each important top-level key in the CURRENT CASE metadata JSON, compare \
-            the current value to the SIMILAR cases' metadata (quote or paraphrase values). State which features align closely, \
-            which differ materially, and which features matter most for the decision.
-              (b) How the similar cases' review_outcome(s) and narratives support or contradict the current pattern.
-              (c) Why the chosen label fits the evidence; if similarity scores are low, say so and explain added uncertainty.
-              Use short labeled sentences or bullet-style clauses for readability. Do not invent keys or values absent from the JSON/text.
+            Output: a single JSON object, no markdown fences, no prose outside JSON. Exactly two string keys:
+            - "label": exactly one of "passed", "rejected", "frozen" (lowercase).
+            - "reason": a long, structured analysis (plain text; you may use line breaks, numbered sections, and bullets). \
+            Minimum length: roughly 400 English words when similar cases exist and metadata is non-trivial; shorter only if \
+            the user message is genuinely sparse.
 
-            If there are no similar cases, decide from the current case alone. If evidence conflicts, prefer a conservative outcome \
-            ("rejected" or "frozen" over "passed").""";
+            Inside "reason", follow this outline in order (use clear headings or numbers):
+            1) **Retrieval & scores** — How many similar cases; each similarity_score; remind that scores are fusion ranks \
+            (low absolute numbers can still mean "best available match"). Classify evidence strength (strong / moderate / weak).
+            2) **Feature-by-feature comparison** — For every meaningful TOP-LEVEL key in the CURRENT CASE metadata JSON \
+            (skip only empty values, purely technical keys, or obvious noise such as assessQueryAt): for EACH similar case, \
+            compare current vs that case's metadata_json — same / close / different / missing on one side. Quote or \
+            paraphrase actual values. Explicitly name which features matter most for risk (e.g. amounts, velocity, \
+            geography, device, channel, tenure) and why.
+            3) **Narrative alignment** — Compare current case_notes to each similar case_notes; overlaps, contradictions, gaps.
+            4) **Historical decisions** — For each similar row, state review_outcome and what that pattern implies for the \
+            current case when combined with feature alignment.
+            5) **Synthesis** — Tie 1–4 to your label; one sentence on residual uncertainty or what would change your mind.
+
+            Rules:
+            - Never invent keys, numbers, or outcomes not present in the user message.
+            - If there are zero similar cases, say so and decide from the CURRENT CASE only; shorten sections 2–4 accordingly.
+            - If metadata is thin, lean on indexed_content and case_notes and state that explicitly.
+            - If evidence conflicts or is ambiguous, prefer "rejected" or "frozen" over "passed".
+            - Language: write "reason" in Chinese if the case notes are clearly Chinese; otherwise English.""";
 
     private final AzureOpenAiProperties props;
     private final ObjectMapper mapper;
@@ -87,8 +100,8 @@ public class AzureOpenAiChatService {
         URI uri = URI.create(base + "/openai/deployments/" + deploy + "/chat/completions?api-version=" + version);
 
         ObjectNode root = mapper.createObjectNode();
-        root.put("temperature", 0.2);
-        root.put("max_tokens", 2800);
+        root.put("temperature", 0.15);
+        root.put("max_tokens", 4096);
         ObjectNode fmt = mapper.createObjectNode();
         fmt.put("type", "json_object");
         root.set("response_format", fmt);
@@ -219,6 +232,12 @@ public class AzureOpenAiChatService {
                 }
             }
         }
+
+        sb.append("""
+                \n---\nTASK (repeat for yourself before answering):\n\
+                Return ONLY the JSON object with "label" and "reason". Put ALL analysis in "reason" following the five-part \
+                outline in the system message. Do not summarize away feature comparisons — the product team reads "reason" \
+                as the full analyst write-up.\n""");
         return sb.toString();
     }
 
