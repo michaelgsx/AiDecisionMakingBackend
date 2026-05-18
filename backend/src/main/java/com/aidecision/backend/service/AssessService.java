@@ -2,6 +2,9 @@ package com.aidecision.backend.service;
 
 import com.aidecision.backend.config.AzureOpenAiProperties;
 import com.aidecision.backend.config.AzureSearchProperties;
+import com.aidecision.backend.dto.AiAssessDecision;
+import com.aidecision.backend.dto.AiAssessEvidence;
+import com.aidecision.backend.dto.AiAssessReasoning;
 import com.aidecision.backend.dto.AssessRequest;
 import com.aidecision.backend.dto.AssessResponse;
 import com.aidecision.backend.dto.SimilarRecord;
@@ -136,12 +139,19 @@ public class AssessService {
 
         String aiLabel = null;
         String aiReason = null;
+        Double aiConfidence = null;
+        List<String> aiKeyRiskFactors = List.of();
+        AiAssessReasoning aiReasoning = null;
+        AiAssessEvidence aiEvidence = null;
         if (openAiProperties.chatConfigured()) {
             try {
-                AzureOpenAiChatService.LabelDecision d =
-                        chatService.classifyWithSimilar(narrative, mergedMeta, similar);
+                AiAssessDecision d = chatService.classifyWithSimilar(narrative, mergedMeta, similar);
                 aiLabel = d.label();
-                aiReason = d.reason();
+                aiReason = d.formattedReason();
+                aiConfidence = d.confidence();
+                aiKeyRiskFactors = d.keyRiskFactors() != null ? d.keyRiskFactors() : List.of();
+                aiReasoning = d.reasoning();
+                aiEvidence = d.evidence();
                 risk = riskFromOutcomeLabel(aiLabel);
             } catch (Exception e) {
                 log.warn("Assess chat step failed; returning search summary only: {}", e.getMessage());
@@ -149,7 +159,8 @@ public class AssessService {
         }
 
         autologAssess(mergedMeta, queryId);
-        return new AssessResponse(risk, reason, similar, aiLabel, aiReason);
+        return new AssessResponse(
+                risk, reason, similar, aiLabel, aiReason, aiConfidence, aiKeyRiskFactors, aiReasoning, aiEvidence);
     }
 
     private void autologAssess(String mergedMeta, String queryId) {

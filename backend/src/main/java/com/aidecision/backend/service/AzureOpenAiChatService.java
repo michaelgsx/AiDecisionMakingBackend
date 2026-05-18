@@ -1,6 +1,10 @@
 package com.aidecision.backend.service;
 
 import com.aidecision.backend.config.AzureOpenAiProperties;
+import com.aidecision.backend.dto.AiAssessDecision;
+import com.aidecision.backend.dto.AiAssessEvidence;
+import com.aidecision.backend.dto.AiAssessEvidenceItem;
+import com.aidecision.backend.dto.AiAssessReasoning;
 import com.aidecision.backend.dto.SimilarRecord;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -13,6 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestClient;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -34,33 +39,44 @@ public class AzureOpenAiChatService {
             You are a senior fraud / AML / compliance risk analyst. You ONLY see what is pasted in the user message: \
             the CURRENT CASE (notes + merged risk metadata JSON) and SIMILAR HISTORICAL CASES from Azure AI Search \
             (each with similarity_score, review_outcome, metadata_json, indexed_content, case_notes, etc.). \
-            Your entire substantive analysis must appear inside the JSON field "reason" — there is no other channel.
+            Your entire substantive analysis must appear inside the JSON object below — there is no other channel.
 
-            Output: a single JSON object, no markdown fences, no prose outside JSON. Exactly two string keys:
-            - "label": exactly one of "passed", "rejected", "frozen" (lowercase).
-            - "reason": a long, structured analysis (plain text; you may use line breaks, numbered sections, and bullets). \
-            Minimum length: roughly 400 English words when similar cases exist and metadata is non-trivial; shorter only if \
-            the user message is genuinely sparse.
+            Output: a single JSON object, no markdown fences, no prose outside JSON. Required keys:
+            - "label" (string): exactly one of "passed", "rejected", "frozen" (lowercase).
+            - "reasoning" (object): five string fields (plain text; line breaks and bullets allowed):
+              - "retrieval_and_scores": How many similar cases; each similarity_score; fusion-rank context; evidence \
+            strength (strong / moderate / weak).
+              - "feature_comparison": For every meaningful TOP-LEVEL key in CURRENT CASE metadata (skip empty, technical, \
+            or noise keys like assessQueryAt): per similar case, compare values (same / close / different / missing). \
+            Quote or paraphrase actual values; name the highest-impact risk features.
+              - "narrative_alignment": Compare current case_notes to each similar case_notes.
+              - "historical_decisions": Per similar row, review_outcome and what the pattern implies for the current case.
+              - "synthesis": Tie sections to your label; residual uncertainty or what would change your mind.
+            - "evidence" (object): citeable facts backing the label (do not repeat the whole reasoning narrative):
+              - "summary" (string): one sentence on overall evidence strength.
+              - "items" (array, at least 1 when the user message has case data): each object:
+                - "kind" (string): "similar_case" | "current_feature" | "narrative"
+                - "record_id" (string, optional): for similar_case — must match a record_id from the user message
+                - "similarity_score" (number, optional): for similar_case
+                - "review_outcome" (string, optional): for similar_case — passed | rejected | frozen
+                - "field" (string, optional): metadata key for current_feature
+                - "value" (string, optional): metadata value for current_feature
+                - "claim" (string, required): how this fact supports your label
+                - "quote" (string, optional): short excerpt from notes/metadata/indexed content
+                - "supports_label" (string, required): passed | rejected | frozen — which label this item supports
+            Optional keys:
+            - "confidence" (number): your confidence in the label, from 0.0 to 1.0.
+            - "key_risk_factors" (array of strings): short bullet phrases for the top drivers (max 8 items).
 
-            Inside "reason", follow this outline in order (use clear headings or numbers):
-            1) **Retrieval & scores** — How many similar cases; each similarity_score; remind that scores are fusion ranks \
-            (low absolute numbers can still mean "best available match"). Classify evidence strength (strong / moderate / weak).
-            2) **Feature-by-feature comparison** — For every meaningful TOP-LEVEL key in the CURRENT CASE metadata JSON \
-            (skip only empty values, purely technical keys, or obvious noise such as assessQueryAt): for EACH similar case, \
-            compare current vs that case's metadata_json — same / close / different / missing on one side. Quote or \
-            paraphrase actual values. Explicitly name which features matter most for risk (e.g. amounts, velocity, \
-            geography, device, channel, tenure) and why.
-            3) **Narrative alignment** — Compare current case_notes to each similar case_notes; overlaps, contradictions, gaps.
-            4) **Historical decisions** — For each similar row, state review_outcome and what that pattern implies for the \
-            current case when combined with feature alignment.
-            5) **Synthesis** — Tie 1–4 to your label; one sentence on residual uncertainty or what would change your mind.
+            Length: when similar cases exist and metadata is non-trivial, each reasoning field should be substantive \
+            (roughly 60–120 English words per field, or proportional Chinese). Shorter only if the user message is sparse.
 
             Rules:
             - Never invent keys, numbers, or outcomes not present in the user message.
-            - If there are zero similar cases, say so and decide from the CURRENT CASE only; shorten sections 2–4 accordingly.
+            - If there are zero similar cases, say so in retrieval_and_scores and decide from the CURRENT CASE only.
             - If metadata is thin, lean on indexed_content and case_notes and state that explicitly.
             - If evidence conflicts or is ambiguous, prefer "rejected" or "frozen" over "passed".
-            - Language: write "reason" in Chinese if the case notes are clearly Chinese; otherwise English.""";
+            - Language: write reasoning fields in Chinese if the case notes are clearly Chinese; otherwise English.""";
 
     private final AzureOpenAiProperties props;
     private final ObjectMapper mapper;
@@ -72,12 +88,14 @@ public class AzureOpenAiChatService {
         this.http = http;
     }
 
+    /** @deprecated Use {@link AiAssessDecision}; kept for test migration. */
+    @Deprecated
     public record LabelDecision(String label, String reason) {}
 
     /**
      * Calls the configured chat deployment with the current case text/metadata and similar records.
      */
-    public LabelDecision classifyWithSimilar(
+    public AiAssessDecision classifyWithSimilar(
             String caseNotes,
             String mergedMetadataJson,
             List<SimilarRecord> similarRecords) {
@@ -149,7 +167,7 @@ public class AzureOpenAiChatService {
             throw new IllegalStateException("Azure OpenAI chat request failed: " + e.getMessage(), e);
         }
 
-        return parseLabelDecision(raw);
+        return parseAssessDecision(raw);
     }
 
     private String buildUserContent(String caseNotes, String mergedMetadataJson, List<SimilarRecord> similar) {
@@ -235,34 +253,149 @@ public class AzureOpenAiChatService {
 
         sb.append("""
                 \n---\nTASK (repeat for yourself before answering):\n\
-                Return ONLY the JSON object with "label" and "reason". Put ALL analysis in "reason" following the five-part \
-                outline in the system message. Do not summarize away feature comparisons — the product team reads "reason" \
-                as the full analyst write-up.\n""");
+                Return ONLY the JSON object with "label", "reasoning" (five fields), and "evidence" (summary + items). \
+                Optionally include "confidence" and "key_risk_factors". Evidence items must cite real values from the \
+                user message only.\n""");
         return sb.toString();
     }
 
-    private LabelDecision parseLabelDecision(String rawResponse) {
+    private AiAssessDecision parseAssessDecision(String rawResponse) {
         try {
             JsonNode root = mapper.readTree(rawResponse);
             String content = root.path("choices").path(0).path("message").path("content").asText("");
             content = stripMarkdownCodeFence(content);
 
             JsonNode obj = mapper.readTree(content);
-            String label = textField(obj, "label").toLowerCase(Locale.ROOT);
-            String reason = textField(obj, "reason");
-
-            if (!label.equals("passed") && !label.equals("rejected") && !label.equals("frozen")) {
-                throw new IllegalStateException("Model returned invalid label: " + label);
-            }
-            if (reason.isBlank()) {
-                throw new IllegalStateException("Model returned empty reason");
-            }
-            return new LabelDecision(label, reason.trim());
+            return parseAssessDecisionBody(obj);
         } catch (IllegalStateException e) {
             throw e;
         } catch (Exception e) {
-            throw new IllegalStateException("Failed to parse chat completion as label JSON", e);
+            throw new IllegalStateException("Failed to parse chat completion as assess decision JSON", e);
         }
+    }
+
+    /** Package-visible for unit tests. */
+    AiAssessDecision parseAssessDecisionBody(JsonNode obj) {
+        String label = textField(obj, "label").toLowerCase(Locale.ROOT);
+        if (!label.equals("passed") && !label.equals("rejected") && !label.equals("frozen")) {
+            throw new IllegalStateException("Model returned invalid label: " + label);
+        }
+
+        AiAssessReasoning reasoning = parseReasoning(obj);
+        AiAssessEvidence evidence = parseEvidence(obj.get("evidence"));
+        Double confidence = parseConfidence(obj.get("confidence"));
+        List<String> keyRiskFactors = parseKeyRiskFactors(obj.get("key_risk_factors"));
+
+        return new AiAssessDecision(label, confidence, keyRiskFactors, reasoning, evidence);
+    }
+
+    private AiAssessEvidence parseEvidence(JsonNode n) {
+        if (n == null || !n.isObject()) {
+            return AiAssessEvidence.empty();
+        }
+        String summary = textField(n, "summary");
+        List<AiAssessEvidenceItem> items = parseEvidenceItems(n.get("items"));
+        return new AiAssessEvidence(summary, items);
+    }
+
+    private static List<AiAssessEvidenceItem> parseEvidenceItems(JsonNode arr) {
+        if (arr == null || !arr.isArray()) {
+            return List.of();
+        }
+        List<AiAssessEvidenceItem> out = new ArrayList<>();
+        for (JsonNode item : arr) {
+            if (item == null || !item.isObject()) {
+                continue;
+            }
+            String claim = textField(item, "claim");
+            if (claim.isBlank()) {
+                continue;
+            }
+            String supports = textField(item, "supports_label").toLowerCase(Locale.ROOT);
+            if (!supports.equals("passed") && !supports.equals("rejected") && !supports.equals("frozen")) {
+                supports = "";
+            }
+            Double score = null;
+            JsonNode scoreNode = item.get("similarity_score");
+            if (scoreNode != null && scoreNode.isNumber()) {
+                score = scoreNode.asDouble();
+            }
+            out.add(new AiAssessEvidenceItem(
+                    textField(item, "kind"),
+                    textField(item, "record_id"),
+                    score,
+                    textField(item, "review_outcome"),
+                    textField(item, "field"),
+                    textField(item, "value"),
+                    claim,
+                    textField(item, "quote"),
+                    supports));
+        }
+        return List.copyOf(out);
+    }
+
+    private AiAssessReasoning parseReasoning(JsonNode obj) {
+        JsonNode reasoningNode = obj.get("reasoning");
+        if (reasoningNode != null && reasoningNode.isObject()) {
+            AiAssessReasoning r = new AiAssessReasoning(
+                    textField(reasoningNode, "retrieval_and_scores"),
+                    textField(reasoningNode, "feature_comparison"),
+                    textField(reasoningNode, "narrative_alignment"),
+                    textField(reasoningNode, "historical_decisions"),
+                    textField(reasoningNode, "synthesis"));
+            if (!r.toFormattedText().isBlank()) {
+                validateReasoningPresent(r);
+                return r;
+            }
+        }
+
+        String legacyReason = textField(obj, "reason");
+        if (!legacyReason.isBlank()) {
+            return legacyReasoningFromMonolith(legacyReason);
+        }
+
+        throw new IllegalStateException("Model returned empty reasoning (missing reasoning object and reason)");
+    }
+
+    private static void validateReasoningPresent(AiAssessReasoning r) {
+        if (r.synthesis() == null || r.synthesis().isBlank()) {
+            throw new IllegalStateException("Model returned empty reasoning.synthesis");
+        }
+    }
+
+    /** Maps pre-schema responses that used a single "reason" string. */
+    private static AiAssessReasoning legacyReasoningFromMonolith(String reason) {
+        return new AiAssessReasoning("", "", "", "", reason.trim());
+    }
+
+    private static Double parseConfidence(JsonNode n) {
+        if (n == null || n.isNull()) {
+            return null;
+        }
+        if (!n.isNumber()) {
+            return null;
+        }
+        double v = n.asDouble();
+        if (v < 0 || v > 1 || Double.isNaN(v)) {
+            return null;
+        }
+        return v;
+    }
+
+    private static List<String> parseKeyRiskFactors(JsonNode n) {
+        if (n == null || !n.isArray()) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        for (JsonNode item : n) {
+            if (item != null && item.isTextual()) {
+                String s = item.asText("").trim();
+                if (!s.isEmpty()) {
+                    out.add(s);
+                }
+            }
+        }
+        return List.copyOf(out);
     }
 
     private static String textField(JsonNode obj, String key) {

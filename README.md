@@ -57,6 +57,69 @@ Java (Spring Boot 3) backend + Python DB migration tooling for the AI RAG risk-r
 
 Response: `{ "ok": true, "recordIndex": 1, "recordId": "uuid", "message": "…; embedding 1536-dim; Azure AI Search indexed" }`
 
+### POST /rag/assess
+
+Request: `{ "text": "optional case notes", "metadata": "{...risk features JSON...}" }`
+
+HTTP response (search + optional chat):
+
+| Field | Source |
+|-------|--------|
+| `risk`, `reason` | Azure AI Search summary (not the LLM) |
+| `similarRecords` | Hybrid retrieval hits |
+| `aiLabel`, `aiReasoning`, `aiEvidence`, `aiConfidence`, `aiKeyRiskFactors` | Chat model when `AZURE_OPENAI_CHAT_DEPLOYMENT` is set |
+| `aiReason` | Plain-text join of `aiReasoning` sections (backward compatible) |
+
+**Assess chat completion JSON** (`response_format: json_object`):
+
+```json
+{
+  "label": "rejected",
+  "confidence": 0.82,
+  "key_risk_factors": ["high wire amount vs short tenure"],
+  "reasoning": {
+    "retrieval_and_scores": "…",
+    "feature_comparison": "…",
+    "narrative_alignment": "…",
+    "historical_decisions": "…",
+    "synthesis": "…"
+  },
+  "evidence": {
+    "summary": "One sentence on evidence strength.",
+    "items": [
+      {
+        "kind": "similar_case",
+        "record_id": "uuid-from-user-message",
+        "similarity_score": 0.91,
+        "review_outcome": "rejected",
+        "claim": "How this fact supports the label",
+        "quote": "Short excerpt from notes/metadata",
+        "supports_label": "rejected"
+      },
+      {
+        "kind": "current_feature",
+        "field": "withdraw_amount",
+        "value": "12500",
+        "claim": "…",
+        "quote": "…",
+        "supports_label": "rejected"
+      },
+      {
+        "kind": "narrative",
+        "claim": "…",
+        "quote": "…",
+        "supports_label": "frozen"
+      }
+    ]
+  }
+}
+```
+
+- `label`: `passed` | `rejected` | `frozen`
+- `reasoning.*`: five analyst sections (snake_case in LLM JSON → camelCase in API)
+- `evidence.items[]`: citeable facts; each item requires `claim` and `supports_label`; `kind` is `similar_case` | `current_feature` | `narrative`
+- Legacy: top-level `"reason"` string still accepted (mapped into `reasoning.synthesis` only)
+
 Ingest pipeline:
 
 1. Merges `metadata` and calls **Azure OpenAI** embeddings on a blob built from `record_id`, `review_outcome`, case notes, and merged metadata JSON (before any DB insert).
