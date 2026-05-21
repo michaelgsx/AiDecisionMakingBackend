@@ -8,13 +8,13 @@
 #     JSON: { "clientId": "…", "clientSecret": "…", "tenantId": "…", "subscriptionId": "…" }
 #     Same SP used by the frontend SWA workflow. The SP needs the
 #     "Website Contributor" role on the App Service (or the resource group).
-# Redeploy: push to v1 with this file or backend/** changes triggers CI.
+# Redeploy: push to main with this file or backend/** changes triggers CI.
 
 name: Deploy Java Backend (Azure App Service)
 
 on:
   push:
-    branches: [v1]
+    branches: [main]
     paths:
       - "backend/**"
       - ".github/workflows/deploy-backend.yml"
