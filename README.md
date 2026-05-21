@@ -17,6 +17,29 @@ Spring Boot API, Azure SQL migrations, and offline Python jobs for the **AI RAG 
 
 **Branch:** `v1` (deployed to App Service `ai-rag-webapp`).
 
+## Azure infrastructure (`ai-rag-rg-1`)
+
+Deployed resources in resource group **ai-rag-rg-1** (West US 2 unless noted):
+
+| Resource | Type | Role |
+|----------|------|------|
+| `ai-rag-webapp` | App Service | Spring Boot API (this repo) |
+| `ai-rag-webapp` | Static Web App | Frontend SPA |
+| `ai-rag-db-1` | Azure SQL (Hyperscale) | Platform database |
+| `ai-rag-sql-server` | SQL server | Hosts `ai-rag-db-1` |
+| `ai-rag-key` | Key Vault | Secrets |
+| `ai-reg-embedding` | Azure OpenAI | Embeddings + chat (West US 3) |
+| `airagsearchsxgu` | AI Search | Index `risk-records` |
+| `airagblob` | Storage account | ML model weights (`logistic`) |
+| `airagacr` | Container Registry | ML training images |
+| `airag-aca-env` | Container Apps Environment | Job host |
+| `ai-rag-ml-daily-train` | Container App Job | Daily `train.py` |
+| Application Insights | Monitoring | Tied to web app |
+
+<p align="center">
+  <img src="docs/screenshots/azure-resource-group.png" alt="Azure Portal — resource group ai-rag-rg-1 overview" width="100%" />
+</p>
+
 ## What this repo does
 
 - **Ingest** labeled risk cases → SQL + embeddings + Azure AI Search index `risk-records`.
